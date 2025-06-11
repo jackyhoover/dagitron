@@ -163,16 +163,27 @@ dag:
             self.parser.parse_string(yaml_missing_tasks)
     
     def test_validate_operator_types(self):
-        """Test validation of operator types."""
-        yaml_invalid_operator = """
+        """Test that any operator type is now accepted at parsing level."""
+        yaml_custom_operator = """
 dag:
-  dag_id: "invalid_operator_test"
+  dag_id: "custom_operator_test"
   schedule_interval: "@daily"
   start_date: "2024-01-01"
 
 tasks:
   - name: "task_1"
-    operator: "NonExistentOperator"
+    operator: "mycompany.operators.CustomOperator"
+  - name: "task_2"  
+    operator: "BashOperator"
+    bash_command: "echo hello"
 """
-        with pytest.raises(YamlValidationError):
-            self.parser.parse_string(yaml_invalid_operator)
+        # Should no longer raise YamlValidationError since custom operators are allowed
+        try:
+            result = self.parser.parse_string(yaml_custom_operator)
+            # Verify parsing succeeds and contains expected content
+            assert result["dag"]["dag_id"] == "custom_operator_test"
+            assert len(result["tasks"]) == 2
+            assert result["tasks"][0]["operator"] == "mycompany.operators.CustomOperator"
+            assert result["tasks"][1]["operator"] == "BashOperator"
+        except YamlValidationError:
+            pytest.fail("Custom operators should be allowed at parsing level")
