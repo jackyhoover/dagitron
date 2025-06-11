@@ -1,0 +1,86 @@
+dag:
+  dag_id: "data_processing_workflow"
+  description: "Complex data processing workflow with sensors and branching"
+  schedule_interval: "@hourly"
+  start_date: "2024-01-01"
+  end_date: "2024-12-31"
+  catchup: false
+  max_active_runs: 3
+  default_args:
+    owner: "analytics_team"
+    depends_on_past: false
+    email_on_failure: true
+    email_on_retry: false
+    email: ["alerts@company.com"]
+    retries: 2
+    retry_delay_minutes: 10
+  tags: ["data", "analytics", "etl"]
+
+tasks:
+  - name: "check_input_file"
+    operator: "FileSensor"
+    filepath: "/data/input/latest.csv"
+    
+  - name: "check_database_connection"
+    operator: "SqlSensor"
+    conn_id: "postgres_default"
+    sql: "SELECT 1"
+    
+  - name: "start_processing"
+    operator: "DummyOperator"
+    depends_on: ["check_input_file", "check_database_connection"]
+    
+  - name: "check_data_quality"
+    operator: "PythonOperator"
+    python_callable: "data_quality_check"
+    op_kwargs:
+      threshold: 0.95
+      report_path: "/tmp/quality_report.json"
+    depends_on: ["start_processing"]
+    
+  - name: "quality_gate"
+    operator: "BranchPythonOperator"
+    python_callable: "quality_gate_decision"
+    depends_on: ["check_data_quality"]
+    
+  - name: "process_good_data"
+    operator: "BashOperator"
+    bash_command: "python /scripts/process_data.py --mode=production"
+    trigger_rule: "one_success"
+    depends_on: ["quality_gate"]
+    
+  - name: "handle_bad_data"
+    operator: "BashOperator"
+    bash_command: "python /scripts/handle_data_issues.py"
+    trigger_rule: "one_success"
+    depends_on: ["quality_gate"]
+    
+  - name: "update_metadata"
+    operator: "PythonOperator"
+    python_callable: "update_processing_metadata"
+    trigger_rule: "none_failed"
+    depends_on: ["process_good_data", "handle_bad_data"]
+    
+  - name: "check_external_system"
+    operator: "HttpSensor"
+    endpoint: "health"
+    conn_id: "external_api"
+    
+  - name: "sync_to_warehouse"
+    operator: "BashOperator"
+    bash_command: "python /scripts/sync_warehouse.py"
+    depends_on: ["update_metadata", "check_external_system"]
+    pool: "warehouse_pool"
+    priority_weight: 10
+    
+  - name: "generate_reports"
+    operator: "PythonOperator"
+    python_callable: "generate_daily_reports"
+    op_args: ["dashboard", "email"]
+    depends_on: ["sync_to_warehouse"]
+    
+  - name: "cleanup_temp_files"
+    operator: "BashOperator"
+    bash_command: "find /tmp -name '*.tmp' -mtime +1 -delete"
+    trigger_rule: "all_done"
+    depends_on: ["generate_reports"]
