@@ -1,0 +1,9 @@
+dag:
+  # Missing required dag_id
+  description: "Invalid DAG missing dag_id"
+  schedule_interval: "@daily"
+
+tasks:
+  - name: "task_1"
+    # Missing required operator
+    bash_command: "echo 'test'"

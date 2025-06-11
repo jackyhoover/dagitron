@@ -1,0 +1,153 @@
+dag:
+  dag_id: "complex_workflow"
+  description: "Complex workflow demonstrating advanced features"
+  schedule_interval: "0 2 * * *"  # Daily at 2 AM
+  start_date: "2024-01-01"
+  catchup: false
+  max_active_runs: 1
+  max_active_tasks: 8
+  default_args:
+    owner: "workflow_team"
+    depends_on_past: true
+    email_on_failure: true
+    email_on_retry: true
+    email: ["workflow-alerts@company.com", "ops@company.com"]
+    retries: 3
+    retry_delay_minutes: 15
+  tags: ["complex", "multi-source", "critical"]
+
+tasks:
+  # Data source checks
+  - name: "check_source_a"
+    operator: "FileSensor"
+    filepath: "/data/sources/source_a/ready.flag"
+    
+  - name: "check_source_b"
+    operator: "S3KeySensor"
+    bucket_name: "data-bucket"
+    bucket_key: "source_b/{{ ds }}/ready.flag"
+    conn_id: "aws_default"
+    
+  - name: "check_source_c"
+    operator: "HttpSensor"
+    endpoint: "api/v1/data/available"
+    conn_id: "external_api"
+    
+  # External dependencies
+  - name: "wait_for_upstream_dag"
+    operator: "ExternalTaskSensor"
+    external_dag_id: "upstream_processing"
+    external_task_id: "final_step"
+    
+  # Parallel processing branches
+  - name: "process_source_a"
+    operator: "BashOperator"
+    bash_command: "python /scripts/process_source_a.py --date {{ ds }}"
+    depends_on: ["check_source_a", "wait_for_upstream_dag"]
+    pool: "processing_pool"
+    
+  - name: "process_source_b"
+    operator: "PythonOperator"
+    python_callable: "process_source_b"
+    op_kwargs:
+      input_date: "{{ ds }}"
+      batch_size: 1000
+    depends_on: ["check_source_b", "wait_for_upstream_dag"]
+    pool: "processing_pool"
+    
+  - name: "process_source_c"
+    operator: "BashOperator"
+    bash_command: "python /scripts/process_source_c.py --date {{ ds }}"
+    depends_on: ["check_source_c", "wait_for_upstream_dag"]
+    pool: "processing_pool"
+    
+  # Quality checks
+  - name: "validate_a"
+    operator: "PythonOperator"
+    python_callable: "validate_source_a_data"
+    depends_on: ["process_source_a"]
+    retries: 1
+    
+  - name: "validate_b"
+    operator: "PythonOperator"
+    python_callable: "validate_source_b_data"
+    depends_on: ["process_source_b"]
+    retries: 1
+    
+  - name: "validate_c"
+    operator: "PythonOperator"
+    python_callable: "validate_source_c_data"
+    depends_on: ["process_source_c"]
+    retries: 1
+    
+  # Consolidation
+  - name: "merge_data"
+    operator: "PythonOperator"
+    python_callable: "merge_all_sources"
+    op_args: ["{{ ds }}"]
+    depends_on: ["validate_a", "validate_b", "validate_c"]
+    priority_weight: 20
+    
+  # Final validation and decisions
+  - name: "final_quality_check"
+    operator: "PythonOperator"
+    python_callable: "comprehensive_quality_check"
+    depends_on: ["merge_data"]
+    
+  - name: "quality_decision"
+    operator: "BranchPythonOperator"
+    python_callable: "make_quality_decision"
+    depends_on: ["final_quality_check"]
+    
+  # Success path
+  - name: "publish_to_prod"
+    operator: "BashOperator"
+    bash_command: "python /scripts/publish_production.py --date {{ ds }}"
+    depends_on: ["quality_decision"]
+    queue: "production_queue"
+    
+  - name: "update_catalog"
+    operator: "PythonOperator"
+    python_callable: "update_data_catalog"
+    depends_on: ["publish_to_prod"]
+    
+  - name: "notify_success"
+    operator: "EmailOperator"
+    to: ["data-consumers@company.com"]
+    subject: "Data Ready - {{ ds }}"
+    html_content: """
+    <h2>Data Processing Complete</h2>
+    <p>Data for {{ ds }} has been successfully processed and is now available.</p>
+    <ul>
+      <li>Processing completed at: {{ ts }}</li>
+      <li>Data location: /prod/data/{{ ds }}</li>
+      <li>Quality score: {{ var.value.quality_score }}</li>
+    </ul>
+    """
+    depends_on: ["update_catalog"]
+    
+  # Failure path
+  - name: "handle_quality_failure"
+    operator: "BashOperator"
+    bash_command: "python /scripts/handle_failure.py --date {{ ds }}"
+    depends_on: ["quality_decision"]
+    trigger_rule: "one_success"
+    
+  - name: "notify_failure"
+    operator: "EmailOperator"
+    to: ["data-engineering@company.com", "ops@company.com"]
+    subject: "ALERT: Data Quality Failure - {{ ds }}"
+    html_content: """
+    <h2 style="color: red;">Data Quality Failure</h2>
+    <p>Data processing for {{ ds }} failed quality checks.</p>
+    <p>Please investigate and take corrective action.</p>
+    <p>Processing timestamp: {{ ts }}</p>
+    """
+    depends_on: ["handle_quality_failure"]
+    
+  # Cleanup (runs regardless of success/failure)
+  - name: "cleanup_workspace"
+    operator: "BashOperator"
+    bash_command: "python /scripts/cleanup.py --date {{ ds }}"
+    trigger_rule: "all_done"
+    depends_on: ["notify_success", "notify_failure"]
