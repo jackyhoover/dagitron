@@ -13,7 +13,7 @@ Dagitron is a Python library that generates Apache Airflow DAGs from YAML specif
 - **Comprehensive dependency management** with cycle detection
 - **Schema validation** with helpful error messages
 - **CLI tool** for generating and validating DAGs
-- **Extensible architecture** for custom operators
+- **Extensible architecture** with support for custom operators
 - **Production-ready** generated DAGs following Airflow best practices
 
 ## 📦 Installation
@@ -106,6 +106,59 @@ Dagitron currently supports these Airflow operators:
 - **S3KeySensor** - Wait for S3 objects
 - **SqlSensor** - Wait for SQL conditions
 - **ExternalTaskSensor** - Wait for external DAG tasks
+
+### Custom Operators
+
+In addition to built-in operators, Dagitron supports **custom Airflow operators** by specifying their fully-qualified import paths.
+
+#### Using Custom Operators
+
+To use a custom operator, specify the full import path in the `operator` field:
+
+```yaml
+tasks:
+  - name: "my_custom_task"
+    operator: "mycompany.operators.CustomDataOperator"
+    # All additional fields are passed as arguments to the operator
+    table_name: "customer_data"
+    processing_mode: "incremental"
+    custom_config:
+      batch_size: 1000
+      timeout: 300
+```
+
+#### Custom Operator Rules
+
+- **Import Path**: Use fully-qualified import paths (e.g., `"package.module.ClassName"`)
+- **Arguments**: All YAML fields except system fields (`name`, `operator`, `depends_on`, etc.) are passed as keyword arguments to the operator constructor
+- **Installation**: Ensure the custom operator package is installed in your Airflow environment
+- **Compatibility**: Custom operators must be compatible with your Airflow version
+
+#### Example Custom Operators
+
+```yaml
+tasks:
+  # Data quality validation operator
+  - name: "validate_data"
+    operator: "data_quality.operators.DataQualityOperator"
+    dataset: "customer_transactions"
+    checks: ["completeness", "uniqueness", "validity"]
+    
+  # ML model training operator  
+  - name: "train_model"
+    operator: "ml_platform.operators.ModelTrainingOperator"
+    algorithm: "random_forest"
+    features: ["age", "income", "credit_score"]
+    target: "risk_score"
+    
+  # Custom notification operator
+  - name: "send_slack_alert"
+    operator: "notifications.operators.SlackOperator"
+    channel: "#data-team" 
+    message: "Pipeline completed successfully"
+```
+
+See `examples/custom_operators.yaml` for a complete example with various custom operators.
 
 ### YAML Schema
 
@@ -344,7 +397,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🗺 Roadmap
 
 - [ ] Support for more Airflow operators
-- [ ] Custom operator plugins
+- [x] Custom operator plugins
 - [ ] Environment variable templating
 - [ ] DAG testing utilities
 - [ ] Integration with popular CI/CD systems

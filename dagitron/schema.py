@@ -138,8 +138,7 @@ DAG_SCHEMA: Dict[str, Any] = {
                     },
                     "operator": {
                         "type": "string",
-                        "enum": SUPPORTED_OPERATORS,
-                        "description": "Airflow operator type"
+                        "description": "Airflow operator type (built-in name or fully-qualified import path)"
                     },
                     "depends_on": {
                         "oneOf": [

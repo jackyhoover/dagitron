@@ -1,0 +1,72 @@
+dag:
+  dag_id: "custom_operators_example"
+  description: "Example DAG demonstrating custom Airflow operators usage"
+  schedule_interval: "@daily"
+  start_date: "2024-01-01"
+  catchup: false
+  default_args:
+    owner: "data_engineering"
+    retries: 1
+    retry_delay_minutes: 5
+
+tasks:
+  # Standard built-in operator
+  - name: "start_pipeline"
+    operator: "DummyOperator"
+    
+  # Custom operator example 1: A hypothetical custom data quality operator
+  - name: "validate_data_quality"
+    operator: "mycompany.operators.DataQualityOperator"
+    depends_on: ["start_pipeline"]
+    table_name: "raw_customer_data"
+    quality_checks:
+      - check_type: "null_check"
+        columns: ["customer_id", "email"]
+      - check_type: "range_check"
+        column: "age"
+        min_value: 0
+        max_value: 120
+    conn_id: "postgres_default"
+    
+  # Custom operator example 2: A custom ML model training operator
+  - name: "train_model"
+    operator: "ml_platform.operators.ModelTrainingOperator"
+    depends_on: ["validate_data_quality"]
+    model_type: "random_forest"
+    features: ["age", "income", "credit_score"]
+    target: "default_risk"
+    hyperparameters:
+      n_estimators: 100
+      max_depth: 10
+      random_state: 42
+    output_path: "s3://ml-models/customer-default/{{ ds }}"
+    
+  # Custom operator example 3: A hypothetical Slack notification operator
+  - name: "notify_team"
+    operator: "custom_notifications.SlackOperator"
+    depends_on: ["train_model"]
+    channel: "#data-team"
+    message: "Model training completed successfully for {{ ds }}"
+    webhook_url: "{{ var.value.slack_webhook_url }}"
+    
+  # Built-in operator for comparison
+  - name: "cleanup_temp_files"
+    operator: "BashOperator"
+    bash_command: "rm -rf /tmp/model_training_{{ ds }}/*"
+    depends_on: ["notify_team"]
+    
+  # Custom operator example 4: A custom file processing operator with complex config
+  - name: "process_files"
+    operator: "file_processors.BatchFileProcessor"
+    depends_on: ["cleanup_temp_files"]
+    input_path: "s3://data-lake/raw/{{ ds }}/"
+    output_path: "s3://data-lake/processed/{{ ds }}/"
+    file_pattern: "*.csv"
+    processing_config:
+      compression: "gzip"
+      format: "parquet"
+      partitioning:
+        - "year"
+        - "month"
+    batch_size: 1000
+    timeout_seconds: 3600

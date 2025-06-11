@@ -2,6 +2,7 @@
 
 from typing import Dict, Any, Optional, List, Union
 from datetime import timedelta
+import importlib
 
 # Import Airflow components with graceful fallback
 try:
@@ -80,14 +81,22 @@ class TaskFactory:
         operator_type = task_config["operator"]
         task_id = task_config["name"]
         
-        if operator_type not in self.supported_operators:
+        # Check if this is a custom operator (contains dots or not in built-in mapping)
+        is_custom_operator = ("." in operator_type) or (operator_type not in self.supported_operators)
+        
+        if not is_custom_operator and operator_type not in self.supported_operators:
             raise UnsupportedOperatorError(
                 f"Unsupported operator type: {operator_type}",
                 f"Supported operators: {', '.join(self.supported_operators)}"
             )
         
         try:
-            operator_class = self._operator_mapping[operator_type]
+            if is_custom_operator:
+                # Dynamic import for custom operators
+                operator_class = self._import_custom_operator(operator_type)
+            else:
+                # Use built-in mapping for standard operators
+                operator_class = self._operator_mapping[operator_type]
             
             # Build operator arguments
             operator_args = self._build_operator_args(task_config, dag)
@@ -98,6 +107,47 @@ class TaskFactory:
         except Exception as e:
             raise TaskFactoryError(
                 f"Failed to create task '{task_id}' with operator '{operator_type}'",
+                str(e)
+            )
+    
+    def _import_custom_operator(self, operator_type: str) -> type:
+        """Import a custom operator class from a fully-qualified import path.
+        
+        Args:
+            operator_type: Fully-qualified import path (e.g., "my_package.operators.MyCustomOperator")
+            
+        Returns:
+            The imported operator class.
+            
+        Raises:
+            TaskFactoryError: If the operator cannot be imported.
+        """
+        try:
+            if "." in operator_type:
+                # Extract module and class name
+                module_name, class_name = operator_type.rsplit(".", 1)
+                module = importlib.import_module(module_name)
+                operator_class = getattr(module, class_name)
+                return operator_class
+            else:
+                # Assume it's a simple class name that can be imported
+                # This allows for some flexibility in how custom operators are specified
+                raise TaskFactoryError(
+                    f"Custom operator '{operator_type}' must be specified as a fully-qualified import path"
+                )
+        except ImportError as e:
+            raise TaskFactoryError(
+                f"Failed to import custom operator '{operator_type}'",
+                f"ImportError: {str(e)}"
+            )
+        except AttributeError as e:
+            raise TaskFactoryError(
+                f"Custom operator class '{operator_type}' not found in module",
+                f"AttributeError: {str(e)}"
+            )
+        except Exception as e:
+            raise TaskFactoryError(
+                f"Failed to import custom operator '{operator_type}'",
                 str(e)
             )
     
@@ -133,24 +183,56 @@ class TaskFactory:
         if "trigger_rule" in task_config:
             args["trigger_rule"] = task_config["trigger_rule"]
         
-        # Operator-specific arguments
-        if operator_type == "BashOperator":
-            args.update(self._build_bash_operator_args(task_config))
-        elif operator_type in ["PythonOperator", "BranchPythonOperator", "ShortCircuitOperator"]:
-            args.update(self._build_python_operator_args(task_config))
-        elif operator_type == "EmailOperator":
-            args.update(self._build_email_operator_args(task_config))
-        elif operator_type == "FileSensor":
-            args.update(self._build_file_sensor_args(task_config))
-        elif operator_type == "HttpSensor":
-            args.update(self._build_http_sensor_args(task_config))
-        elif operator_type == "S3KeySensor":
-            args.update(self._build_s3_sensor_args(task_config))
-        elif operator_type == "SqlSensor":
-            args.update(self._build_sql_sensor_args(task_config))
-        elif operator_type == "ExternalTaskSensor":
-            args.update(self._build_external_task_sensor_args(task_config))
-        # DummyOperator needs no additional arguments
+        # Check if this is a custom operator
+        is_custom_operator = ("." in operator_type) or (operator_type not in self.supported_operators)
+        
+        if is_custom_operator:
+            # For custom operators, pass all additional fields as kwargs
+            args.update(self._build_custom_operator_args(task_config))
+        else:
+            # Operator-specific arguments for built-in operators
+            if operator_type == "BashOperator":
+                args.update(self._build_bash_operator_args(task_config))
+            elif operator_type in ["PythonOperator", "BranchPythonOperator", "ShortCircuitOperator"]:
+                args.update(self._build_python_operator_args(task_config))
+            elif operator_type == "EmailOperator":
+                args.update(self._build_email_operator_args(task_config))
+            elif operator_type == "FileSensor":
+                args.update(self._build_file_sensor_args(task_config))
+            elif operator_type == "HttpSensor":
+                args.update(self._build_http_sensor_args(task_config))
+            elif operator_type == "S3KeySensor":
+                args.update(self._build_s3_sensor_args(task_config))
+            elif operator_type == "SqlSensor":
+                args.update(self._build_sql_sensor_args(task_config))
+            elif operator_type == "ExternalTaskSensor":
+                args.update(self._build_external_task_sensor_args(task_config))
+            # DummyOperator needs no additional arguments
+        
+        return args
+    
+    def _build_custom_operator_args(self, task_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Build arguments for custom operators by passing all additional fields as kwargs.
+        
+        Args:
+            task_config: Task configuration dictionary.
+            
+        Returns:
+            Dictionary of operator arguments.
+        """
+        args = {}
+        
+        # Define the fields that should be excluded (these are handled elsewhere)
+        excluded_fields = {
+            "name", "operator", "depends_on", 
+            "retries", "retry_delay_minutes", "pool", 
+            "priority_weight", "queue", "trigger_rule"
+        }
+        
+        # Pass all other fields as kwargs to the custom operator
+        for key, value in task_config.items():
+            if key not in excluded_fields:
+                args[key] = value
         
         return args
     

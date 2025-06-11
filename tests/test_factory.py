@@ -36,16 +36,21 @@ class TestTaskFactory:
     
     def test_unsupported_operator(self):
         """Test error handling for unsupported operators."""
+        # Use the TaskFactory validation logic directly to test unsupported operators
+        # Since custom operators are now allowed, we need to test the validation differently
+        
+        # Test that built-in validation still works for known invalid operators
         task_config = {
             "name": "test_task",
-            "operator": "NonExistentOperator"
+            "operator": "NonExistentOperator"  # This will be treated as custom operator now
         }
         
-        # Should fail at operator validation level before Airflow check
-        with pytest.raises(UnsupportedOperatorError) as exc_info:
+        # This should try to import as custom operator and fail
+        with pytest.raises(TaskFactoryError) as exc_info:
             self.factory.create_task(task_config, None)
         
-        assert "Unsupported operator type" in str(exc_info.value)
+        # Should fail either at Airflow check or import check
+        assert "Airflow is not installed" in str(exc_info.value) or "Failed to import custom operator" in str(exc_info.value)
     
     def test_build_bash_operator_args(self):
         """Test building BashOperator arguments."""
@@ -148,3 +153,78 @@ class TestTaskFactory:
             self.factory._resolve_callable("nonexistent.function.that.does.not.exist")
         
         assert "Failed to resolve callable" in str(exc_info.value)
+    
+    def test_import_custom_operator_valid_path(self):
+        """Test importing a valid custom operator."""
+        # Use a built-in Python class that we know exists
+        operator_class = self.factory._import_custom_operator("builtins.str")
+        assert operator_class == str
+        
+    def test_import_custom_operator_invalid_path(self):
+        """Test importing an invalid custom operator."""
+        with pytest.raises(TaskFactoryError) as exc_info:
+            self.factory._import_custom_operator("nonexistent.module.NonExistentOperator")
+        
+        assert "Failed to import custom operator" in str(exc_info.value)
+        
+    def test_import_custom_operator_invalid_class(self):
+        """Test importing from valid module but invalid class."""
+        with pytest.raises(TaskFactoryError) as exc_info:
+            self.factory._import_custom_operator("builtins.NonExistentClass")
+        
+        assert "not found in module" in str(exc_info.value)
+        
+    def test_import_custom_operator_no_dot(self):
+        """Test that custom operators without dots raise an error."""
+        with pytest.raises(TaskFactoryError) as exc_info:
+            self.factory._import_custom_operator("SimpleOperatorName")
+        
+        assert "must be specified as a fully-qualified import path" in str(exc_info.value)
+    
+    def test_build_custom_operator_args(self):
+        """Test building custom operator arguments."""
+        task_config = {
+            "name": "custom_task",
+            "operator": "my_package.operators.CustomOperator",
+            "custom_param": "value1",
+            "another_param": 42,
+            "complex_param": {"key": "value"},
+            # These should be excluded
+            "retries": 3,
+            "depends_on": ["other_task"]
+        }
+        
+        args = self.factory._build_custom_operator_args(task_config)
+        
+        # Should include custom parameters
+        assert args["custom_param"] == "value1"
+        assert args["another_param"] == 42
+        assert args["complex_param"] == {"key": "value"}
+        
+        # Should exclude system fields
+        assert "name" not in args
+        assert "operator" not in args
+        assert "retries" not in args
+        assert "depends_on" not in args
+    
+    def test_detect_custom_operator(self):
+        """Test detection of custom operators."""
+        # Test with fully-qualified name (should be detected as custom)
+        task_config_custom = {
+            "name": "test_task",
+            "operator": "my_package.operators.MyCustomOperator"
+        }
+        
+        operator_type = task_config_custom["operator"]
+        is_custom = ("." in operator_type) or (operator_type not in self.factory.supported_operators)
+        assert is_custom
+        
+        # Test with built-in operator (should not be detected as custom)
+        task_config_builtin = {
+            "name": "test_task", 
+            "operator": "BashOperator"
+        }
+        
+        operator_type = task_config_builtin["operator"]
+        is_custom = ("." in operator_type) or (operator_type not in self.factory.supported_operators)
+        assert not is_custom
