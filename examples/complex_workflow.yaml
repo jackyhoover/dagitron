@@ -115,15 +115,14 @@ tasks:
     operator: "EmailOperator"
     to: ["data-consumers@company.com"]
     subject: "Data Ready - {{ ds }}"
-    html_content: """
-    <h2>Data Processing Complete</h2>
-    <p>Data for {{ ds }} has been successfully processed and is now available.</p>
-    <ul>
-      <li>Processing completed at: {{ ts }}</li>
-      <li>Data location: /prod/data/{{ ds }}</li>
-      <li>Quality score: {{ var.value.quality_score }}</li>
-    </ul>
-    """
+    html_content: |
+      <h2>Data Processing Complete</h2>
+      <p>Data for {{ ds }} has been successfully processed and is now available.</p>
+      <ul>
+        <li>Processing completed at: {{ ts }}</li>
+        <li>Data location: /prod/data/{{ ds }}</li>
+        <li>Quality score: {{ var.value.quality_score }}</li>
+      </ul>
     depends_on: ["update_catalog"]
     
   # Failure path
@@ -137,12 +136,11 @@ tasks:
     operator: "EmailOperator"
     to: ["data-engineering@company.com", "ops@company.com"]
     subject: "ALERT: Data Quality Failure - {{ ds }}"
-    html_content: """
-    <h2 style="color: red;">Data Quality Failure</h2>
-    <p>Data processing for {{ ds }} failed quality checks.</p>
-    <p>Please investigate and take corrective action.</p>
-    <p>Processing timestamp: {{ ts }}</p>
-    """
+    html_content: |
+      <h2 style="color: red;">Data Quality Failure</h2>
+      <p>Data processing for {{ ds }} failed quality checks.</p>
+      <p>Please investigate and take corrective action.</p>
+      <p>Processing timestamp: {{ ts }}</p>
     depends_on: ["handle_quality_failure"]
     
   # Cleanup (runs regardless of success/failure)
